@@ -83,7 +83,6 @@ minigit/sorting.py    병합 정렬
 minigit/index.py      역색인
 minigit/diff.py       줄 단위 diff(LCS)
 minigit/repository.py 브랜치, HEAD, 커밋 생성, 검색
-minigit/storage.py    저장소 상태를 파일로 저장하고 불러오기
 minigit/commands.py   명령 실행과 출력 형식
 minigit/repl.py       한 줄씩 입력받는 REPL
 tests/                단위 테스트와 REPL 테스트
