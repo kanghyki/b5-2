@@ -1,7 +1,9 @@
 """명령 파싱, 실행, 출력을 반복하는 REPL 인터페이스."""
 
 import shlex
+from pathlib import Path
 
+from minigit.diff import ADDED, DELETED, diff_lines
 from minigit.graph import Commit
 from minigit.repository import SORT_KEYS, MiniGitError, Repository
 
@@ -40,6 +42,25 @@ def format_found(commits: list[Commit], noun: str) -> str:
     return "\n".join(lines)
 
 
+def format_diff(old_name: str, new_name: str, entries: list[tuple[str, str]]) -> str:
+    """파일 이름 머리글, 표시가 붙은 줄, 추가/삭제/공통 줄 수 요약을 만든다."""
+    added = sum(1 for mark, _ in entries if mark == ADDED)
+    deleted = sum(1 for mark, _ in entries if mark == DELETED)
+    common = len(entries) - added - deleted
+    lines = [f"--- {old_name}", f"+++ {new_name}"]
+    lines.extend(f"{mark} {line}" for mark, line in entries)
+    lines.append(f"{added} added, {deleted} deleted, {common} common")
+    return "\n".join(lines)
+
+
+def read_lines(path: str) -> list[str]:
+    """UTF-8 텍스트 파일을 줄 목록으로 읽는다. 읽을 수 없으면 MiniGitError를 던진다."""
+    try:
+        return Path(path).read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as error:
+        raise MiniGitError(f"Cannot read file: {path}") from error
+
+
 class MiniGitCli:
     """입력 한 줄을 저장소 호출로 바꾸고 결과를 문자열로 돌려준다."""
 
@@ -54,6 +75,7 @@ class MiniGitCli:
             "path": self._path,
             "ancestors": self._ancestors,
             "search": self._search,
+            "diff": self._diff,
         }
 
     def execute(self, line: str) -> str:
@@ -153,3 +175,9 @@ class MiniGitCli:
         if option is None or option[0] != "author" or not option[1].strip():
             raise MiniGitError(INVALID_ARGS)
         return format_found(self._repo.search_author(option[1]), "commit")
+
+    def _diff(self, args: list[str]) -> str:
+        if len(args) != 2 or not args[0] or not args[1]:
+            raise MiniGitError(INVALID_ARGS)
+        old_lines, new_lines = read_lines(args[0]), read_lines(args[1])
+        return format_diff(args[0], args[1], diff_lines(old_lines, new_lines))

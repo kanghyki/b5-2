@@ -1,6 +1,7 @@
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -146,6 +147,46 @@ class CliTest(unittest.TestCase):
         self.assertEqual(
             self.cli.execute("search login"),
             f"Found 2 commits:\n- {login}: Add login feature\n- {second}: Fix login",
+        )
+
+
+class DiffCommandTest(unittest.TestCase):
+    def setUp(self):
+        self.cli = MiniGitCli()
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.dir = Path(directory.name)
+
+    def write(self, name, text):
+        path = self.dir / name
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    def test_marks_added_deleted_and_common_lines_without_init(self):
+        old = self.write("old.txt", "keep\nremove me\nend\n")
+        new = self.write("new file.txt", "keep\nadd me\nend\n")
+        self.assertEqual(
+            self.cli.execute(f'DIFF {old} "{new}"'),
+            f"--- {old}\n+++ {new}\n"
+            "  keep\n- remove me\n+ add me\n  end\n"
+            "1 added, 1 deleted, 2 common",
+        )
+
+    def test_invalid_args(self):
+        old = self.write("old.txt", "a\n")
+        for line in ["diff", f"diff {old}", f"diff {old} {old} {old}", f'diff {old} ""']:
+            with self.subTest(line=line):
+                self.assertEqual(self.cli.execute(line), "Invalid args")
+
+    def test_unreadable_files(self):
+        old = self.write("old.txt", "a\n")
+        missing = str(self.dir / "missing.txt")
+        binary = self.dir / "binary.bin"
+        binary.write_bytes(b"\xff\xfe\x00")
+        self.assertEqual(self.cli.execute(f"diff {old} {missing}"), f"Cannot read file: {missing}")
+        self.assertEqual(self.cli.execute(f"diff {binary} {old}"), f"Cannot read file: {binary}")
+        self.assertEqual(
+            self.cli.execute(f"diff {self.dir} {old}"), f"Cannot read file: {self.dir}"
         )
 
 

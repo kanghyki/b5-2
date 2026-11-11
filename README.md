@@ -1,6 +1,6 @@
 # Mini Git
 
-Git의 커밋 구조를 메모리에서 재현한 CLI 프로그램입니다. 브랜치를 만들어 커밋을 쌓고, 커밋 그래프를 탐색하고, 메시지와 작성자로 커밋을 검색할 수 있습니다. 파일 내용은 추적하지 않고 커밋 메타데이터만 다루며, 프로그램을 종료하면 데이터는 사라집니다.
+Git의 커밋 구조를 메모리에서 재현한 CLI 프로그램입니다. 브랜치를 만들어 커밋을 쌓고, 커밋 그래프를 탐색하고, 메시지와 작성자로 커밋을 검색할 수 있습니다. 파일 내용은 추적하지 않고 커밋 메타데이터만 다루며, 프로그램을 종료하면 데이터는 사라집니다. 두 텍스트 파일을 줄 단위로 비교하는 `DIFF`도 제공합니다.
 
 ## 실행
 
@@ -27,9 +27,10 @@ python -m unittest            # 테스트
 | `ANCESTORS <commit_hash>` | 커밋의 모든 조상 출력 |
 | `SEARCH <keyword>` | 키워드가 메시지에 들어 있는 커밋 출력 |
 | `SEARCH --author=<name>` | 해당 작성자의 커밋 출력 |
+| `DIFF <file1> <file2>` | 두 텍스트 파일을 줄 단위로 비교해 추가·삭제·공통 줄 출력 |
 | `exit`, `quit` | 프로그램 종료 |
 
-오류는 `Invalid args`, `Unknown branch: <name>`, `Unknown commit: <hash>`, `Branch already exists: <name>`, `Unknown command: <name>`, `Repository not initialized`로 출력합니다.
+오류는 `Invalid args`, `Unknown branch: <name>`, `Unknown commit: <hash>`, `Branch already exists: <name>`, `Unknown command: <name>`, `Repository not initialized`, `Cannot read file: <path>`로 출력합니다.
 
 ```text
 mini-git> init "Alice"
@@ -59,6 +60,18 @@ Found 1 commit:
 - **정렬:** 오름차순입니다. 작성자는 대소문자 구분 없이 비교하고, 같은 값은 생성 순서를 유지합니다.
 - **키워드 검색:** 공백으로 나눈 토큰 단위로 대소문자 구분 없이 일치시킵니다. `login`은 `relogin`이나 `login,`과 일치하지 않습니다. 공백이 있는 키워드는 토큰이 메시지에 연속으로 나타나는 커밋을 찾습니다.
 - **작성자 검색:** 이름이 대소문자까지 정확히 같아야 합니다.
+- **DIFF:** 저장소와 무관하게 동작하므로 `INIT` 없이도 쓸 수 있습니다. 상대 경로는 프로그램을 실행한 디렉터리 기준이고, 파일은 UTF-8 텍스트로 읽습니다. 공통 줄은 앞에 공백 두 칸, 삭제된 줄은 `- `, 추가된 줄은 `+ `를 붙이고, 마지막 줄에 개수를 요약합니다. 한 자리에서 줄이 바뀌면 삭제를 추가보다 먼저 보여 줍니다.
+
+```text
+mini-git> diff old.txt new.txt
+--- old.txt
++++ new.txt
+  keep
+- old
++ new
+  end
+1 added, 1 deleted, 2 common
+```
 
 ## 구조
 
@@ -68,6 +81,7 @@ minigit/graph.py      커밋 노드와 커밋 그래프
 minigit/traversal.py  위상 정렬, 조상 탐색, 최단 경로
 minigit/sorting.py    병합 정렬
 minigit/index.py      역색인
+minigit/diff.py       줄 단위 diff(LCS)
 minigit/repository.py 브랜치, HEAD, 커밋 생성, 검색
 minigit/cli.py        명령 파싱과 REPL
 tests/                단위 테스트와 REPL 테스트
@@ -112,3 +126,15 @@ tests/                단위 테스트와 REPL 테스트
 | 역색인 | O(K) | K는 일치하는 커밋 수 |
 
 검색 비용을 커밋 수가 아닌 결과 수에 비례하게 만드는 대신, 커밋을 만들 때 토큰 수만큼의 색인 갱신 비용과 추가 메모리를 사용합니다. 공백이 있는 키워드는 각 토큰의 해시 목록을 교집합으로 좁힌 뒤, 남은 후보에서만 토큰이 연속으로 나타나는지 확인합니다.
+
+### 줄 단위 diff
+
+두 파일의 차이를 가장 적은 줄로 보여 주려면 바꾸지 않아도 되는 줄, 즉 두 파일에 같은 순서로 나타나는 줄을 최대한 많이 남겨야 합니다. 이것이 최장 공통 부분 수열(LCS) 문제입니다. LCS에 든 줄은 공통 줄, 첫 파일에만 남은 줄은 삭제, 둘째 파일에만 남은 줄은 추가가 됩니다.
+
+`lcs[i][j]`를 `old[i:]`와 `new[j:]`의 LCS 길이로 두고 표의 끝에서부터 채웁니다. 그다음 앞에서부터 따라가며 두 줄이 같으면 공통으로 내보내고, 다르면 LCS가 더 긴 쪽으로 이동합니다. 두 방향의 값이 같으면 삭제를 택하므로 바뀐 줄은 삭제가 추가보다 먼저 나옵니다.
+
+| 시간 | 추가 공간 |
+| --- | --- |
+| O(n × m) | O(n × m) |
+
+n, m은 두 파일의 줄 수입니다. 보통 수정은 파일 일부에만 있으므로 표를 만들기 전에 앞뒤의 같은 줄을 떼어 내고, 남은 구간만 표로 계산합니다. 실제 Git은 바뀐 줄 수 D에 대해 O((n + m) × D)인 Myers 알고리즘을 쓰지만, 이 프로젝트는 파일 크기가 작다고 보고 구현이 단순한 LCS 표를 택했습니다.
