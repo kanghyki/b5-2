@@ -1,12 +1,15 @@
-"""REPL과 CLI가 함께 쓰는 명령 실행기와 출력 형식."""
+"""명령 파싱, 실행, 출력을 반복하는 REPL 인터페이스."""
 
+import shlex
 from pathlib import Path
 
 from minigit.diff import ADDED, DELETED, diff_lines
 from minigit.graph import Commit
 from minigit.repository import SORT_KEYS, MiniGitError, Repository
 
+PROMPT = "mini-git> "
 INVALID_ARGS = "Invalid args"
+EXIT_COMMANDS = ("exit", "quit")
 
 
 def parse_option(token: str) -> tuple[str, str] | None:
@@ -58,15 +61,11 @@ def read_lines(path: str) -> list[str]:
         raise MiniGitError(f"Cannot read file: {path}") from error
 
 
-class CommandRunner:
-    """이미 토큰으로 나뉜 명령을 저장소 호출로 바꾸고 결과를 문자열로 돌려준다.
-
-    입력을 어떻게 받는지(REPL의 한 줄, 셸의 인자 목록)와 오류를 어디에 출력하는지는
-    호출하는 쪽이 정한다. 실패는 모두 MiniGitError로 알린다.
-    """
+class MiniGitCli:
+    """입력 한 줄을 저장소 호출로 바꾸고 결과를 문자열로 돌려준다."""
 
     def __init__(self, repository: Repository | None = None) -> None:
-        self._repo = Repository() if repository is None else repository
+        self._repo = repository or Repository()
         self._handlers = {
             "init": self._init,
             "branch": self._branch,
@@ -79,17 +78,36 @@ class CommandRunner:
             "diff": self._diff,
         }
 
-    def run(self, tokens: list[str]) -> str:
-        """[명령 이름, 인자...]를 실행해 출력할 문자열을 돌려준다.
-
-        명령 이름은 대소문자를 구분하지 않는다. 알 수 없는 명령이거나 실행에 실패하면
-        MiniGitError를 던진다.
-        """
+    def execute(self, line: str) -> str:
+        """명령 한 줄을 실행해 출력할 문자열을 돌려준다. 빈 줄이면 빈 문자열이다."""
+        try:
+            tokens = shlex.split(line)
+        except ValueError:
+            return INVALID_ARGS
+        if not tokens:
+            return ""
         name, args = tokens[0], tokens[1:]
         handler = self._handlers.get(name.lower())
         if handler is None:
-            raise MiniGitError(f"Unknown command: {name}")
-        return handler(args)
+            return f"Unknown command: {name}"
+        try:
+            return handler(args)
+        except MiniGitError as error:
+            return str(error)
+
+    def run(self) -> None:
+        """exit, quit, EOF, Ctrl-C 중 하나가 들어올 때까지 명령을 처리한다."""
+        while True:
+            try:
+                line = input(PROMPT)
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return
+            if line.strip().lower() in EXIT_COMMANDS:
+                return
+            output = self.execute(line)
+            if output:
+                print(output)
 
     @staticmethod
     def _single_text(args: list[str]) -> str:
