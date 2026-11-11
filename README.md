@@ -1,19 +1,25 @@
 # Mini Git
 
-Git의 커밋 구조를 메모리에서 재현한 CLI 프로그램입니다. 브랜치를 만들어 커밋을 쌓고, 커밋 그래프를 탐색하고, 메시지와 작성자로 커밋을 검색할 수 있습니다. 파일 내용은 추적하지 않고 커밋 메타데이터만 다루며, 프로그램을 종료하면 데이터는 사라집니다. 두 텍스트 파일을 줄 단위로 비교하는 `DIFF`도 제공합니다.
+Git의 커밋 구조를 재현한 프로그램입니다. 브랜치를 만들어 커밋을 쌓고, 커밋 그래프를 탐색하고, 메시지와 작성자로 커밋을 검색할 수 있습니다. 두 텍스트 파일을 줄 단위로 비교하는 `DIFF`도 제공합니다. 파일 내용은 추적하지 않고 커밋 메타데이터만 다룹니다.
+
+같은 명령을 두 가지 방식으로 실행할 수 있습니다.
+
+- **REPL:** `mini-git>` 프롬프트에서 명령을 이어서 입력합니다. 저장소는 메모리에만 있어 종료하면 사라집니다.
+- **CLI:** 셸에서 명령 하나를 실행하고 끝납니다. 저장소는 `.minigit/` 디렉터리에 저장되어 다음 실행에서 이어집니다.
 
 ## 실행
 
 Python 3.10 이상이 필요하고, 별도로 설치할 패키지는 없습니다.
 
 ```bash
-python main.py                # 환경에 따라 python3 main.py
-python -m unittest            # 테스트
+python main.py                      # REPL, 환경에 따라 python3 main.py
+python main.py <command> [args...]  # CLI, 예: python main.py commit "Add login feature"
+python -m unittest                  # 테스트
 ```
 
 ## 명령어
 
-명령어 이름은 대소문자를 구분하지 않습니다. 공백이 있는 문자열은 따옴표로 감쌉니다.
+명령어 이름은 대소문자를 구분하지 않습니다. 공백이 있는 문자열은 따옴표로 감쌉니다. CLI에서는 셸이 따옴표를 처리하므로, 셸 규칙대로 감싸면 됩니다.
 
 | 명령어 | 동작 |
 | --- | --- |
@@ -28,9 +34,9 @@ python -m unittest            # 테스트
 | `SEARCH <keyword>` | 키워드가 메시지에 들어 있는 커밋 출력 |
 | `SEARCH --author=<name>` | 해당 작성자의 커밋 출력 |
 | `DIFF <file1> <file2>` | 두 텍스트 파일을 줄 단위로 비교해 추가·삭제·공통 줄 출력 |
-| `exit`, `quit` | 프로그램 종료 |
+| `exit`, `quit` | REPL 종료 |
 
-오류는 `Invalid args`, `Unknown branch: <name>`, `Unknown commit: <hash>`, `Branch already exists: <name>`, `Unknown command: <name>`, `Repository not initialized`, `Cannot read file: <path>`로 출력합니다.
+오류는 `Invalid args`, `Unknown branch: <name>`, `Unknown commit: <hash>`, `Branch already exists: <name>`, `Unknown command: <name>`, `Repository not initialized`, `Cannot read file: <path>`로 출력합니다. CLI에서는 이 밖에 저장 파일을 읽거나 쓸 수 없을 때 `Corrupted repository: <path>`, `Cannot write repository: <path>`를 출력합니다.
 
 ```text
 mini-git> init "Alice"
@@ -73,10 +79,32 @@ mini-git> diff old.txt new.txt
 1 added, 1 deleted, 2 common
 ```
 
+## CLI
+
+인자를 주고 실행하면 명령 하나를 처리하고 끝납니다.
+
+```bash
+$ python main.py init "Alice"
+Initialized repository.
+Current branch: main
+Current user: Alice
+$ python main.py commit "Initial commit"
+[main e3779b1] Initial commit
+$ python main.py log
+commit e3779b1 (Alice, 2026-11-11 10:00:00) [main]
+    Initial commit
+```
+
+- **저장 위치:** 현재 디렉터리부터 상위로 올라가며 `.minigit/`을 찾습니다. 하위 디렉터리에서 실행해도 같은 저장소를 씁니다. 찾지 못하면 `INIT`이 현재 디렉터리에 새로 만들고, 다른 명령은 `Repository not initialized`를 출력합니다.
+- **저장 시점:** `INIT`, `BRANCH`, `SWITCH`, `COMMIT`이 성공했을 때만 저장합니다. 조회 명령과 실패한 명령은 파일을 바꾸지 않습니다. `DIFF`는 저장소를 읽지도 만들지도 않습니다.
+- **출력과 종료 코드:** 결과는 표준 출력에, 오류는 표준 오류에 쓰고 각각 종료 코드 0과 1로 끝납니다. `No path`, `No commits found` 같은 빈 결과도 정상 결과입니다.
+- **인자:** 셸이 나눈 인자를 그대로 씁니다. 그래서 메시지에 따옴표가 들어 있어도 다시 나뉘지 않습니다.
+- **REPL과의 관계:** REPL은 `.minigit/`을 읽거나 쓰지 않습니다. 두 방식은 같은 명령 실행기를 쓰므로 명령의 동작과 출력은 같습니다.
+
 ## 구조
 
 ```text
-main.py               엔트리 포인트
+main.py               엔트리 포인트, 인자 유무로 REPL과 CLI 선택
 minigit/graph.py      커밋 노드와 커밋 그래프
 minigit/traversal.py  위상 정렬, 조상 탐색, 최단 경로
 minigit/sorting.py    병합 정렬
@@ -84,9 +112,10 @@ minigit/index.py      역색인
 minigit/diff.py       줄 단위 diff(LCS)
 minigit/repository.py 브랜치, HEAD, 커밋 생성, 검색
 minigit/storage.py    저장소 상태를 파일로 저장하고 불러오기
-minigit/commands.py   명령 실행과 출력 형식
-minigit/repl.py       한 줄씩 입력받는 REPL
-tests/                단위 테스트와 REPL 테스트
+minigit/commands.py   명령 실행과 출력 형식(REPL과 CLI 공용)
+minigit/repl.py       한 줄씩 입력받는 REPL, 메모리 저장소
+minigit/cli.py        명령 하나를 실행하는 CLI, 파일 저장소
+tests/                단위 테스트, REPL과 CLI 테스트
 ```
 
 ## 설계
@@ -140,3 +169,20 @@ tests/                단위 테스트와 REPL 테스트
 | O(n × m) | O(n × m) |
 
 n, m은 두 파일의 줄 수입니다. 보통 수정은 파일 일부에만 있으므로 표를 만들기 전에 앞뒤의 같은 줄을 떼어 내고, 남은 구간만 표로 계산합니다. 실제 Git은 바뀐 줄 수 D에 대해 O((n + m) × D)인 Myers 알고리즘을 쓰지만, 이 프로젝트는 파일 크기가 작다고 보고 구현이 단순한 LCS 표를 택했습니다.
+
+### REPL과 CLI의 분리
+
+두 방식은 입력을 받는 방법과 저장소가 사는 기간만 다릅니다. 그래서 명령을 처리하는 부분을 `CommandRunner` 하나로 모으고, 두 인터페이스는 그 앞뒤만 맡습니다.
+
+| | REPL | CLI |
+| --- | --- | --- |
+| 입력 | 한 줄을 `shlex`로 토큰화 | 셸이 나눈 인자를 그대로 사용 |
+| 저장소 | 세션 동안 메모리에 유지 | 실행마다 `.minigit/state.json`에서 불러오고 저장 |
+| 오류 | 메시지를 출력하고 다음 입력을 받음 | 표준 오류에 쓰고 종료 코드 1 |
+
+CLI는 실행할 때마다 프로세스가 새로 뜨므로 상태를 파일에 남겨야 합니다. 저장 파일에는 커밋을 생성 순서대로, 브랜치, HEAD, 사용자, 해시 카운터를 기록합니다.
+
+- **커밋 순서:** `LOG`의 위상 정렬과 정렬의 동률 처리는 커밋이 그래프에 들어간 순서를 따릅니다. 불러올 때 같은 순서로 다시 넣으므로 결과가 저장 전과 같습니다.
+- **해시 카운터:** 해시는 카운터에서 만들어지므로, 카운터를 저장하지 않으면 다음 실행에서 같은 해시가 다시 나옵니다. 카운터를 이어 받아 저장소 전체에서 해시가 유일하게 유지됩니다.
+- **역색인:** 커밋에서 다시 만들 수 있으므로 저장하지 않습니다. 불러올 때 커밋을 다시 넣으면서 함께 만들어지고, 비용은 전체 토큰 수에 비례합니다.
+- **안전한 저장:** 같은 디렉터리의 임시 파일에 모두 쓴 뒤 이름을 바꿔 교체합니다. 쓰는 도중에 멈춰도 기존 파일이 깨지지 않습니다. 다만 잠금은 없으므로 여러 프로세스가 동시에 쓰면 마지막으로 저장한 쪽만 남습니다.
