@@ -1,6 +1,7 @@
 """브랜치, HEAD, 커밋 그래프, 색인을 묶어 관리하는 저장소."""
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 
 from minigit.graph import Commit, CommitGraph
@@ -20,6 +21,20 @@ class MiniGitError(Exception):
     """사용자에게 그대로 보여 줄 수 있는 오류."""
 
 
+@dataclass(frozen=True)
+class RepositoryState:
+    """저장소를 다시 만드는 데 필요한 값. commits는 생성 순서를 따른다.
+
+    색인은 커밋에서 다시 만들 수 있으므로 담지 않는다.
+    """
+
+    user: str | None
+    current_branch: str | None
+    branches: dict[str, str | None]
+    commits: tuple[Commit, ...]
+    hash_counter: int
+
+
 class HashGenerator:
     """세션 내에서 중복되지 않는 7자리 16진수 해시를 만든다.
 
@@ -30,8 +45,13 @@ class HashGenerator:
     _BITS = 28
     _MULTIPLIER = 0x9E3779B1
 
-    def __init__(self) -> None:
-        self._counter = 0
+    def __init__(self, counter: int = 0) -> None:
+        self._counter = counter
+
+    @property
+    def counter(self) -> int:
+        """지금까지 만든 해시 수. 이 값으로 생성기를 다시 만들면 이어서 만든다."""
+        return self._counter
 
     def next(self) -> str:
         """다음 해시를 돌려준다. 해시 공간을 모두 쓰면 오류를 던진다."""
@@ -54,6 +74,43 @@ class Repository:
         self._author_index = InvertedIndex()
         self._current_branch: str | None = None
         self._user: str | None = None
+
+    @classmethod
+    def from_state(
+        cls, state: RepositoryState, clock: Callable[[], datetime] = datetime.now
+    ) -> "Repository":
+        """state()로 얻은 값으로 저장소를 다시 만든다.
+
+        커밋을 생성 순서대로 다시 추가하므로 그래프의 순회 순서와 색인이 원래와 같아진다.
+        값이 서로 맞지 않으면 ValueError를 던진다.
+        """
+        repo = cls(clock)
+        for commit in state.commits:
+            repo._record(commit)
+        for name, head in state.branches.items():
+            if head is not None and head not in repo._graph:
+                raise ValueError(f"Branch {name} points to unknown commit: {head}")
+        if state.current_branch is not None and state.current_branch not in state.branches:
+            raise ValueError(f"Unknown current branch: {state.current_branch}")
+        if state.current_branch is None and (state.branches or state.commits):
+            raise ValueError("History exists without a current branch")
+        if state.hash_counter < len(state.commits):
+            raise ValueError(f"Hash counter is behind: {state.hash_counter}")
+        repo._branches = dict(state.branches)
+        repo._current_branch = state.current_branch
+        repo._user = state.user
+        repo._hashes = HashGenerator(state.hash_counter)
+        return repo
+
+    def state(self) -> RepositoryState:
+        """저장소를 다시 만드는 데 필요한 값을 돌려준다."""
+        return RepositoryState(
+            user=self._user,
+            current_branch=self._current_branch,
+            branches=dict(self._branches),
+            commits=tuple(self._commits(self._graph)),
+            hash_counter=self._hashes.counter,
+        )
 
     @property
     def current_branch(self) -> str | None:
@@ -107,11 +164,8 @@ class Repository:
             parents=() if head is None else (head,),
             branch=self._current_branch,
         )
-        self._graph.add(commit)
+        self._record(commit)
         self._branches[self._current_branch] = commit.hash
-        self._author_index.add(commit.author, commit.hash)
-        for token in tokenize(commit.message):
-            self._keyword_index.add(token, commit.hash)
         return commit
 
     def log(self) -> list[Commit]:
@@ -152,6 +206,13 @@ class Repository:
         """이름이 정확히 일치하는 작성자의 커밋을 생성 순서대로 돌려준다."""
         self._require_initialized()
         return self._commits(self._author_index.lookup(author))
+
+    def _record(self, commit: Commit) -> None:
+        """커밋을 그래프에 추가하고 작성자와 키워드 색인을 갱신한다."""
+        self._graph.add(commit)
+        self._author_index.add(commit.author, commit.hash)
+        for token in tokenize(commit.message):
+            self._keyword_index.add(token, commit.hash)
 
     def _commits(self, hashes) -> list[Commit]:
         """해시 목록을 커밋 목록으로 바꾼다."""
