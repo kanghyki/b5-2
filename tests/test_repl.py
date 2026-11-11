@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from minigit.cli import MiniGitCli
+from minigit.repl import Repl
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -15,16 +15,16 @@ def committed_hash(output):
     return re.match(r"\[\S+ (\w+)\]", output).group(1)
 
 
-class CliTest(unittest.TestCase):
+class ReplCommandTest(unittest.TestCase):
     def setUp(self):
-        self.cli = MiniGitCli()
+        self.cli = Repl()
         self.cli.execute('init "Alice"')
 
     def commit(self, message):
         return committed_hash(self.cli.execute(f'commit "{message}"'))
 
     def test_command_names_ignore_case(self):
-        cli = MiniGitCli()
+        cli = Repl()
         self.assertIn("Initialized repository.", cli.execute("INIT Alice"))
         self.assertIn("Created branch: dev", cli.execute("BrAnCh dev"))
         self.assertIn("Switched to branch: dev", cli.execute("SWITCH dev"))
@@ -36,7 +36,7 @@ class CliTest(unittest.TestCase):
 
     def test_init_output(self):
         self.assertEqual(
-            MiniGitCli().execute('init "Alice Kim"'),
+            Repl().execute('init "Alice Kim"'),
             "Initialized repository.\nCurrent branch: main\nCurrent user: Alice Kim",
         )
 
@@ -85,7 +85,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(self.cli.execute("ancestors a"), "Unknown commit: a")
         self.assertEqual(self.cli.execute("branch main"), "Branch already exists: main")
         self.assertEqual(self.cli.execute("frobnicate"), "Unknown command: frobnicate")
-        self.assertEqual(MiniGitCli().execute("log"), "Repository not initialized")
+        self.assertEqual(Repl().execute("log"), "Repository not initialized")
 
     def test_blank_line_produces_no_output(self):
         self.assertEqual(self.cli.execute("   "), "")
@@ -152,7 +152,7 @@ class CliTest(unittest.TestCase):
 
 class DiffCommandTest(unittest.TestCase):
     def setUp(self):
-        self.cli = MiniGitCli()
+        self.cli = Repl()
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.dir = Path(directory.name)
